@@ -3,20 +3,52 @@ import Head from 'next/head';
 
 export default function Home() {
   useEffect(() => {
-    // The initMap function will be called by the Google Maps script
-    window.initMap = initMap;
-    
-    // Load the Google Maps JavaScript API
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&callback=initMap`;
-    script.async = true;
-    script.defer = true;
-    document.head.appendChild(script);
+    // Check if window is defined (client-side only)
+    if (typeof window === 'undefined') return;
 
-    return () => {
-      // Cleanup
-      document.head.removeChild(script);
+    // Function to load Google Maps API
+    const loadGoogleMaps = () => {
+      // Check if Google Maps is already loaded
+      if (window.google && window.google.maps) {
+        initMap();
+        return;
+      }
+
+      // Create the script element
+      const script = document.createElement('script');
+      // Use the environment variable directly - Next.js will replace this at build time
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        console.error('Google Maps API key is not set');
+        return;
+      }
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&loading=async&callback=initMap`;
+      script.async = true;
+      script.defer = true;
+      
+      // Handle script load
+      script.onload = () => {
+        console.log('Google Maps API loaded successfully');
+      };
+      
+      // Handle script error
+      script.onerror = () => {
+        console.error('Error loading Google Maps API');
+      };
+      
+      // Add script to the document
+      document.head.appendChild(script);
+
+      return () => {
+        // Cleanup
+        if (document.head.contains(script)) {
+          document.head.removeChild(script);
+        }
+      };
     };
+
+    // Load Google Maps
+    loadGoogleMaps();
   }, []);
 
   // The initMap function will be available globally
@@ -37,23 +69,38 @@ export default function Home() {
         { lat: 36.36305, lng: -105.30173, name: "Angel Fire" }
       ];
 
-      // Add markers
+      // Add markers using AdvancedMarkerElement
       const markers = [];
       points.forEach(point => {
-        const marker = new google.maps.Marker({
+        // Create a div element for the marker
+        const markerElement = document.createElement('div');
+        markerElement.className = 'advanced-marker';
+        markerElement.textContent = '📍'; // You can customize this with your own marker
+        markerElement.style.fontSize = '24px';
+        markerElement.style.cursor = 'pointer';
+
+        // Create the advanced marker
+        const marker = new google.maps.marker.AdvancedMarkerElement({
           position: { lat: point.lat, lng: point.lng },
           map: map,
-          title: point.name
+          title: point.name,
+          content: markerElement
         });
-        markers.push(marker);
 
         // Add info window on click
         const infoWindow = new google.maps.InfoWindow({
           content: `<strong>${point.name}</strong><br>Lat: ${point.lat}, Lng: ${point.lng}`
         });
-        marker.addListener("click", () => {
-          infoWindow.open(map, marker);
+
+        markerElement.addEventListener('click', () => {
+          infoWindow.open({
+            anchor: marker,
+            map,
+            shouldFocus: false,
+          });
         });
+
+        markers.push(marker);
       });
 
       // Create red polylines for ALL pairs of points
