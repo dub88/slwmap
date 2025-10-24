@@ -18,11 +18,24 @@ export default function Home() {
       const script = document.createElement('script');
       // Use the environment variable directly - Next.js will replace this at build time
       const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
+      
       if (!apiKey) {
         console.error('Google Maps API key is not set');
         return;
       }
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&loading=async&callback=initMap`;
+      
+      // Load Google Maps API with required libraries and features
+      let scriptUrl = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&loading=async&callback=initMap`;
+      
+      // Add Map ID if available
+      if (mapId) {
+        scriptUrl += `&map_ids=${mapId}`;
+      } else {
+        console.warn('Google Maps Map ID is not set. Advanced Markers may not work correctly.');
+      }
+      
+      script.src = scriptUrl;
       script.async = true;
       script.defer = true;
       
@@ -54,10 +67,12 @@ export default function Home() {
   // The initMap function will be available globally
   if (typeof window !== 'undefined') {
     window.initMap = function() {
-      // Initialize the map with initial center
+      // Initialize the map with initial center and Map ID
       const map = new google.maps.Map(document.getElementById("map"), {
         zoom: 6,
         center: { lat: 37.0, lng: -109.0 },
+        mapId: process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID, // Add your Map ID from Google Cloud Console
+        mapTypeControl: false,
       });
 
       // Define the points (lat, lng, name)
@@ -104,21 +119,29 @@ export default function Home() {
       });
 
       // Create red polylines for ALL pairs of points
-      for (let i = 0; i < points.length; i++) {
-        for (let j = i + 1; j < points.length; j++) {
-          const path = [
-            { lat: points[i].lat, lng: points[i].lng },
-            { lat: points[j].lat, lng: points[j].lng }
-          ];
-          const polyline = new google.maps.Polyline({
-            path: path,
-            geodesic: false,
-            strokeColor: "#FF0000",
-            strokeOpacity: 0.7,
-            strokeWeight: 2
-          });
-          polyline.setMap(map);
+      if (window.google?.maps?.Polyline) {
+        for (let i = 0; i < points.length; i++) {
+          for (let j = i + 1; j < points.length; j++) {
+            try {
+              const path = [
+                { lat: points[i].lat, lng: points[i].lng },
+                { lat: points[j].lat, lng: points[j].lng }
+              ];
+              const polyline = new google.maps.Polyline({
+                path: path,
+                geodesic: false,
+                strokeColor: "#FF0000",
+                strokeOpacity: 0.7,
+                strokeWeight: 2
+              });
+              polyline.setMap(map);
+            } catch (error) {
+              console.error('Error creating polyline:', error);
+            }
+          }
         }
+      } else {
+        console.warn('Google Maps Polyline API not available');
       }
 
       // Phoenix position
@@ -137,37 +160,67 @@ export default function Home() {
       ];
 
       const bluePolylines = [];
-      endpoints.forEach(endpoint => {
-        const marker = new google.maps.Marker({
-          position: endpoint.pos,
-          map: map,
-          title: endpoint.label,
-          draggable: true
-        });
+      
+      if (window.google?.maps?.Polyline && window.google?.maps?.marker?.AdvancedMarkerElement) {
+        endpoints.forEach(endpoint => {
+          try {
+            // Create marker element
+            const markerElement = document.createElement('div');
+            markerElement.className = 'advanced-marker';
+            markerElement.textContent = '📍';
+            markerElement.style.fontSize = '24px';
+            markerElement.style.cursor = 'move';
 
-        const polyline = new google.maps.Polyline({
-          path: [phoenix, endpoint.through, endpoint.pos],
-          geodesic: false,
-          strokeColor: "#0000FF",
-          strokeOpacity: 0.7,
-          strokeWeight: 2
-        });
-        polyline.setMap(map);
-        bluePolylines.push({ polyline, marker });
+            // Create advanced marker
+            const marker = new google.maps.marker.AdvancedMarkerElement({
+              position: endpoint.pos,
+              map: map,
+              title: endpoint.label,
+              content: markerElement,
+              gmpDraggable: true
+            });
 
-        // Update polyline when marker is dragged
-        marker.addListener("drag", () => {
-          polyline.setPath([phoenix, endpoint.through, marker.getPosition()]);
-        });
+            // Create polyline
+            const polyline = new google.maps.Polyline({
+              path: [phoenix, endpoint.through, endpoint.pos],
+              geodesic: false,
+              strokeColor: "#0000FF",
+              strokeOpacity: 0.7,
+              strokeWeight: 2
+            });
+            polyline.setMap(map);
+            
+            bluePolylines.push({ polyline, marker });
 
-        // Add info window for endpoint
-        const infoWindow = new google.maps.InfoWindow({
-          content: `<strong>${endpoint.label}</strong><br>Lat: ${endpoint.pos.lat.toFixed(6)}, Lng: ${endpoint.pos.lng.toFixed(6)}`
+            // Update polyline when marker is dragged
+            marker.addListener('drag', (e) => {
+              polyline.setPath([phoenix, endpoint.through, e.latLng]);
+              
+              // Update info window content
+              const lat = e.latLng.lat().toFixed(6);
+              const lng = e.latLng.lng().toFixed(6);
+              infoWindow.setContent(`<strong>${endpoint.label}</strong><br>Lat: ${lat}, Lng: ${lng}`);
+            });
+
+            // Add info window
+            const infoWindow = new google.maps.InfoWindow({
+              content: `<strong>${endpoint.label}</strong><br>Lat: ${endpoint.pos.lat.toFixed(6)}, Lng: ${endpoint.pos.lng.toFixed(6)}`
+            });
+
+            markerElement.addEventListener('click', () => {
+              infoWindow.open({
+                anchor: marker,
+                map,
+                shouldFocus: false,
+              });
+            });
+          } catch (error) {
+            console.error('Error creating endpoint marker:', error);
+          }
         });
-        marker.addListener("click", () => {
-          infoWindow.open(map, marker);
-        });
-      });
+      } else {
+        console.warn('Google Maps AdvancedMarkerElement or Polyline API not available');
+      }
 
       // Fit bounds to include all points and endpoints
       const bounds = new google.maps.LatLngBounds();
